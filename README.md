@@ -34,14 +34,6 @@ python train.py --transfer ./results/shapenet_SRN_car/1235678
 1. Assessing the behavior of the loss along training
 2. Testing on a cluster of multiple gpus
 
-## Sampling:
-
-```
-python sample.py --model trained_model.pt --target ./data/SRN/cars_train/a4d535e1b1d3c153ff23af07d9064736
-```
-
-We set the diffusion steps to be 256 during sampling procedure, which takes around 10 minutes per view. 
-
 ## Pre-trained Model Weights:
 
 [Google Drive](https://drive.google.com/file/d/1GarX4DA2FNPHeAUbzSkV1RuJC0Ci-SE5/view?usp=sharing)
