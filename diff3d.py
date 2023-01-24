@@ -66,7 +66,7 @@ class Diff3D(pl.LightningModule):
     def training_step(self, batch, batch_idx, loss_type="l2"):
 
         self.warmup()
-        self.optimizer.zero_grad()
+        self.optimizers().zero_grad()
     
         noise = torch.randn_like(batch[0][:, 0]) # batch => img => x
         predicted_noise = self.forward(in_x=batch, noise=noise)
@@ -87,12 +87,12 @@ class Diff3D(pl.LightningModule):
     # -----------------
     def configure_optimizers(self):
         
-        self.optimizer = Adam(self.xunet_denoiser.parameters(), lr=1e-4, betas=(0.9, 0.99))
-        
-        if self.pretrained_optim is not None:
-            self.optimizer.load_state_dict(ckpt['optim'])
+        optimizer = Adam(self.xunet_denoiser.parameters(), lr=1e-4, betas=(0.9, 0.99))
 
-        return self.optimizer
+        if self.pretrained_optim is not None:
+            optimizer.load_state_dict(ckpt['optim'])
+
+        return optimizer
 
     # -----------------
     def warmup(self):
@@ -102,9 +102,9 @@ class Diff3D(pl.LightningModule):
         last_step = self.n_samples/self.batch_size, 
 
         if self.step < last_step[0]:
-            self.optimizer.param_groups[0]['lr'] = self.step / last_step[0] * self.lr
+            self.optimizers().param_groups[0]['lr'] = self.step / last_step[0] * self.lr
         else:
-            self.optimizer.param_groups[0]['lr'] = self.lr
+            self.optimizers().param_groups[0]['lr'] = self.lr
 
     # ---------------------------------------------------------------------------
 
