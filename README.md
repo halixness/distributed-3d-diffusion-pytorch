@@ -4,9 +4,13 @@ Unofficial PyTorch Implementation of [Novel View Synthesis with Diffusion Models
 
 ## Changes:
 
-As the JAX code given by the authors are not runnable, we fixed the original code to runnable JAX code, while following the authors intend described in the paper. Please compare [Author's code](original_code.py) and our [fixed version](original_code_fixed.py) to see the changes we made.
+**Distributed version:**
+- [x] Code runs with PyTorchLightning Trainer on cpu
+- [x] Code runs on single gpu
+- [ ] Code runs on multiple gpus
 
-The PyTorch implementation is in [xunet.py](xunet.py). Feel free to put up an issue if the implementation is not consistent with the original JAX code. 
+### Bugs
+- Weird loss=1 at epoch 0
 
 ## Data Preparation:
 
