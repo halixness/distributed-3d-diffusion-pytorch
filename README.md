@@ -30,6 +30,10 @@ To continue training,
 python train.py --transfer ./results/shapenet_SRN_car/1235678
 ```
 
+## TODO:
+1. Assessing the behavior of the loss along training
+2. Testing on a cluster of multiple gpus
+
 ## Sampling:
 
 ```
@@ -43,12 +47,3 @@ We set the diffusion steps to be 256 during sampling procedure, which takes arou
 [Google Drive](https://drive.google.com/file/d/1GarX4DA2FNPHeAUbzSkV1RuJC0Ci-SE5/view?usp=sharing)
 
 We trained SRN Car dataset for 101K steps for 120 hours. We have tested using 8 x RTX3090 with batch size of 128 and image size of 64 x 64. Due to the memory constraints, we were not able to test the original authors' configuration of image size 128 x 128.
-
-
-## TODO:
-1. ~~Add trained model~~
-2. Add evaluation code.
-3. Get similar performance as reported.
-
-## Missing:
-1. EMA decay not implemented.
