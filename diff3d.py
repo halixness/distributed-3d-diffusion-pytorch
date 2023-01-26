@@ -8,9 +8,20 @@ import torch.nn.functional as F
 from xunet import XUNet
 
 class Diff3D(pl.LightningModule):
+    """
+        • We use a learning rate with peak value 0.0001, using linear warmup for the first 10 million examples (where one batch has batch_size examples), following Karras et al. (2022).
+        • We use a global batch size of 128.
+        • We train each batch element as an unconditional example 10% of the time to enable classifier-free
+        guidance. This is done by overriding the conditioning frame to be at the maximum noise level.
+        We note other options are possible (e.g., zeroing-out the conditioning frame), but we chose the
+        option which is most compatible with our neural architecture.
+        • We use the Adam optimizer (Kingma & Ba, 2014) with β1 = 0.9 and β2 = 0.99.
+        • We use EMA decay for the model parameters, with a half life of 500K examples (where one batch
+        has batch_size examples) following Karras et al. (2022).
+    """
 
     # -----------------
-    def __init__(self, pretrained_model=None, n_samples=10000000, image_size = 64, batch_size = 128, lr=1e-4):
+    def __init__(self, pretrained_model=None, n_samples=10000000, image_size = 64, batch_size = 128, lr=1e-4, use_scheduler=False):
         super().__init__()
         """
             pretrained_model: String    path to the .pt file    
@@ -19,6 +30,7 @@ class Diff3D(pl.LightningModule):
         self.batch_size = batch_size
         self.image_size = image_size
         self.lr = lr
+        self.use_scheduler = use_scheduler
         self.step = 0
 
         self.pretrained_optim = None
@@ -65,7 +77,9 @@ class Diff3D(pl.LightningModule):
     # -----------------
     def training_step(self, batch, batch_idx, loss_type="l2"):
 
-        self.warmup()
+        if not self.use_scheduler:
+            self.warmup()
+        
         self.optimizers().zero_grad()
     
         noise = torch.randn_like(batch[0][:, 0]) # batch => img => x
@@ -82,17 +96,24 @@ class Diff3D(pl.LightningModule):
 
         self.step += 1
 
+        if self.use_scheduler:
+            self.lr_schedulers().step()
+
         return loss
 
     # -----------------
     def configure_optimizers(self):
         
-        optimizer = Adam(self.xunet_denoiser.parameters(), lr=1e-4, betas=(0.9, 0.99))
-
+        optimizer = Adam(self.xunet_denoiser.parameters(), lr=self.lr, betas=(0.9, 0.99))
+        
         if self.pretrained_optim is not None:
-            optimizer.load_state_dict(ckpt['optim'])
+            optimizer.load_state_dict(self.pretrained_optim)
 
-        return optimizer
+        if self.use_scheduler:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=300)
+            return [optimizer], [scheduler]
+        else:
+            return [optimizer]
 
     # -----------------
     def warmup(self):
@@ -102,7 +123,7 @@ class Diff3D(pl.LightningModule):
         last_step = self.n_samples/self.batch_size, 
 
         if self.step < last_step[0]:
-            self.optimizers().param_groups[0]['lr'] = self.step / last_step[0] * self.lr
+            self.optimizers().param_groups[0]['lr'] = (self.step / last_step[0]) * self.lr
         else:
             self.optimizers().param_groups[0]['lr'] = self.lr
 
