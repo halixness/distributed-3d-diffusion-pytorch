@@ -36,7 +36,7 @@ if __name__ == '__main__':
     val_loader = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=data_workers)
 
     model = Diff3D(
-        n_samples=len(train_loader),
+        n_samples=len(train_loader.dataset),
         use_scheduler=False,
         pretrained_model = (None if args.transfer == "" else args.transfer),
         image_size = image_size,
