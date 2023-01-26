@@ -9,9 +9,6 @@ Unofficial PyTorch Implementation of [Novel View Synthesis with Diffusion Models
 - [x] Code runs on single gpu
 - [ ] Code runs on multiple gpus
 
-### Bugs
-- Weird loss=1 at epoch 0
-
 ## Data Preparation:
 
 Visit [SRN repository](https://github.com/vsitzmann/scene-representation-networks) and download `chairs_train.zip` and `cars_train.zip` and extract the downloaded files in `/data/`. Here we use 90% of the training data for training and 10% as the validation set.
