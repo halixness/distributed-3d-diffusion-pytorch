@@ -5,27 +5,28 @@ Unofficial PyTorch Implementation of [Novel View Synthesis with Diffusion Models
 ## Changes:
 
 **Distributed version:**
-- [x] Code runs with PyTorchLightning Trainer on cpu
-- [x] Code runs on single gpu
-- [ ] Code runs on multiple gpus
+- [x] Running PyTorch Lightning version
+- [ ] PyTorch DDP support for large scale training 
+
+## Training:
+
+### PyTorch DDP
+Yet to test, copied from the doc:
+```
+torchrun --nnodes=1 --nproc_per_node=1 --rdzv_id=100 --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:29400 train.py
+
+```
+
+### PyTorch Lightning
+```
+python train.py --train_data path_to_data --transfer path_to_ckpt
+```
 
 ## Data Preparation:
 
 Visit [SRN repository](https://github.com/vsitzmann/scene-representation-networks) and download `chairs_train.zip` and `cars_train.zip` and extract the downloaded files in `/data/`. Here we use 90% of the training data for training and 10% as the validation set.
 
 We include pickle file that contains available view-png files per object. 
-
-## Training:
-
-```
-python train.py
-```
-
-To continue training, 
-
-```
-python train.py --transfer ./results/shapenet_SRN_car/1235678
-```
 
 ## TODO:
 1. Assessing the behavior of the loss along training
