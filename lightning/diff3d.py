@@ -1,13 +1,12 @@
+import pytorch_lightning as pl
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 from torch.optim import Adam
 import numpy as np
 import torch.nn.functional as F
-import torch.nn as nn
-from lightning.xunet import XUNet
+from xunet import XUNet
 
-class Diff3D(nn.Module):
+class Diff3D(pl.LightningModule):
     """
         • We use a learning rate with peak value 0.0001, using linear warmup for the first 10 million examples (where one batch has batch_size examples), following Karras et al. (2022).
         • We use a global batch size of 128.
@@ -19,6 +18,60 @@ class Diff3D(nn.Module):
         • We use EMA decay for the model parameters, with a half life of 500K examples (where one batch
         has batch_size examples) following Karras et al. (2022).
     """
+
+    # -----------------
+    def __init__(self, pretrained_model=None, n_samples=10000000, image_size = 64, batch_size = 128, lr=1e-4, use_scheduler=False):
+        super().__init__()
+        """
+            pretrained_model: String    path to the .pt file    
+        """
+        self.n_samples = n_samples # used in implementation for warmup???
+        self.batch_size = batch_size
+        self.image_size = image_size
+        self.lr = lr
+        self.use_scheduler = use_scheduler
+        self.step = 0
+
+        self.pretrained_optim = None
+        self.optimizer = None
+        
+        self.xunet_denoiser = XUNet(H=self.image_size, W=self.image_size, ch=128) 
+        
+        if pretrained_model is not None:
+            print('[-] Loading pre-trained model: ', pretrained_model)
+            ckpt = torch.load(pretrained_model)
+            
+            self.xunet_denoiser.load_state_dict(ckpt['model'])
+            self.pretrained_optim = ckpt['optim']
+            
+            #now = args.transfer
+            #writer = SummaryWriter(now)
+            #step = ckpt['step']
+
+    # -----------------
+    def forward(self, in_x, noise=None, cond_prob=0.1):
+
+        img, R, T, K = in_x
+        
+        # Diffusion denoising steps
+        B = img.shape[0]
+        x = img[:, 0]
+        z = img[:, 1]
+
+        logsnr = self.logsnr_schedule_cosine(torch.rand((B,)))
+        
+        if noise is None:
+            noise = torch.randn_like(x)
+
+        z_noisy = self.q_sample(z=z, logsnr=logsnr, noise=noise)
+        
+        cond_mask = torch.Tensor(torch.rand((B,)) > cond_prob).to(self.device)
+        x_condition = torch.where(cond_mask[:, None, None, None], x, torch.randn_like(x).to(self.device))
+        
+        batch = self.xt2batch(x=x_condition, logsnr=logsnr, z=z_noisy, R=R, T=T, K=K)
+        predicted_noise = self.xunet_denoiser(batch, cond_mask=cond_mask).to(self.device)
+
+        return predicted_noise
 
     # -----------------
     def training_step(self, batch, batch_idx, loss_type="l2"):
@@ -50,6 +103,7 @@ class Diff3D(nn.Module):
     # -----------------
     def configure_optimizers(self):
         
+        optimizer = Adam(self.xunet_denoiser.parameters(), lr=self.lr, betas=(0.9, 0.99))
         
         if self.pretrained_optim is not None:
             optimizer.load_state_dict(self.pretrained_optim)
@@ -61,54 +115,16 @@ class Diff3D(nn.Module):
             return [optimizer]
 
     # -----------------
-    def __init__(self, pretrained_model=None, n_samples=10000000, image_size = 64, batch_size = 128, lr=1e-4, use_scheduler=False):
-        super().__init__()
+    def warmup(self):
         """
-            pretrained_model: String    path to the .pt file    
+            Warmup phase, gradient setting
         """
-        self.n_samples = n_samples # used in implementation for warmup???
-        self.batch_size = batch_size
-        self.image_size = image_size
-        self.lr = lr
-        self.use_scheduler = use_scheduler
-        self.step = 0
+        last_step = self.n_samples/self.batch_size, 
 
-        self.pretrained_optim = None
-        self.optimizer = None
-        
-        self.xunet_denoiser = XUNet(H=self.image_size, W=self.image_size, ch=128) 
-        
-        if pretrained_model is not None:
-            print('[-] Loading pre-trained model: ', pretrained_model)
-            ckpt = torch.load(pretrained_model)
-            
-            self.xunet_denoiser.load_state_dict(ckpt['model'])
-            self.pretrained_optim = ckpt['optim']
-            
-    # -----------------
-    def forward(self, in_x, noise=None, cond_prob=0.1):
-
-        img, R, T, K = in_x
-        
-        # Diffusion denoising steps
-        B = img.shape[0]
-        x = img[:, 0]
-        z = img[:, 1]
-
-        logsnr = self.logsnr_schedule_cosine(torch.rand((B,)))
-        
-        if noise is None:
-            noise = torch.randn_like(x)
-
-        z_noisy = self.q_sample(z=z, logsnr=logsnr, noise=noise)
-        
-        cond_mask = torch.Tensor(torch.rand((B,)) > cond_prob).to(self.device)
-        x_condition = torch.where(cond_mask[:, None, None, None], x, torch.randn_like(x).to(self.device))
-        
-        batch = self.xt2batch(x=x_condition, logsnr=logsnr, z=z_noisy, R=R, T=T, K=K)
-        predicted_noise = self.xunet_denoiser(batch, cond_mask=cond_mask).to(self.device)
-
-        return predicted_noise
+        if self.step < last_step[0]:
+            self.optimizers().param_groups[0]['lr'] = (self.step / last_step[0]) * self.lr
+        else:
+            self.optimizers().param_groups[0]['lr'] = self.lr
 
     # ---------------------------------------------------------------------------
 

@@ -18,10 +18,9 @@ import random
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--model',type=str, default="./trained_model.pt")
-parser.add_argument('--target',type=str, default="./data/SRN/cars_train/a4d535e1b1d3c153ff23af07d9064736")
+parser.add_argument('--model',type=str, default="./../trained_model.pt")
+parser.add_argument('--target',type=str, default="./../data/SRN/cars_train/a4d535e1b1d3c153ff23af07d9064736")
 args = parser.parse_args()
-
 
 imgsize = 64
 

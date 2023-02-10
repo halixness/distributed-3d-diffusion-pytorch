@@ -97,7 +97,7 @@ class dataset(Dataset):
 if __name__ == "__main__":
     
     from torch.utils.data import DataLoader
-
+    
     d = dataset('train')
     dd = d[0]
     

@@ -1,11 +1,13 @@
+import pytorch_lightning as pl
 import numpy as np
 import torch
 from einops import rearrange
 import visu3d as v3d
 import etils
 from etils.enp import numpy_utils
-lazy = numpy_utils.lazy
 from typing import Tuple
+
+lazy = numpy_utils.lazy
 etils.enp.linalg._tf_or_xnp = lambda x: lazy.get_xnp(x)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -38,7 +40,7 @@ def posenc_ddpm(timesteps, emb_ch: int, max_time=1000.):
     half_dim = emb_ch // 2
     # 10000 is the magic number from transformers.
     emb = np.log(10000) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim) * -emb).to(device=timesteps.get_device())
+    emb = torch.exp(torch.arange(half_dim) * -emb)
     emb = emb.reshape(*([1] * (timesteps.ndim - 1)), emb.shape[-1])
     emb = timesteps[..., None] * emb
     emb = torch.concat([torch.sin(emb), torch.cos(emb)], dim=-1).float()
@@ -50,7 +52,7 @@ def posenc_nerf(x, min_deg=0, max_deg=15):
     """Concatenate x and its positional encodings, following NeRF."""
     if min_deg == max_deg:
         return x
-    scales = torch.tensor([2**i for i in range(min_deg, max_deg)]).float().to(x.get_device())
+    scales = torch.tensor([2**i for i in range(min_deg, max_deg)]).float()
     
     xb = rearrange(
       (x[..., None, :] * scales[:, None]), "b f h w c d -> b f h w (c d)")
@@ -58,7 +60,7 @@ def posenc_nerf(x, min_deg=0, max_deg=15):
     
     return torch.concat([x, emb], dim=-1)
     
-class GroupNorm(torch.nn.Module):
+class GroupNorm(pl.LightningModule):
     """Group normalization, applied over frames."""
 
     def __init__(self, num_groups=32, num_channels=64):
@@ -71,7 +73,7 @@ class GroupNorm(torch.nn.Module):
         return h.reshape(B, 2, C, H, W)
     
     
-class FiLM(torch.nn.Module):
+class FiLM(pl.LightningModule):
     """Feature-wise linear modulation."""
 
     def __init__(self, features:int, emb_ch=1024):
@@ -87,7 +89,7 @@ class FiLM(torch.nn.Module):
         return h * (1. + scale) + shift
     
     
-class ResnetBlock(torch.nn.Module):
+class ResnetBlock(pl.LightningModule):
     """BigGAN-style residual block, applied over frames."""
     
     def __init__(self, 
@@ -151,7 +153,7 @@ class ResnetBlock(torch.nn.Module):
             
         return self.updown((h+ h_in) / np.sqrt(2))
     
-class AttnLayer(torch.nn.Module):
+class AttnLayer(pl.LightningModule):
     
     def __init__(self, attn_heads=4, in_channels=32):
         super().__init__()
@@ -176,7 +178,7 @@ class AttnLayer(torch.nn.Module):
         
         return rearrange(out, "b l c -> b c l")
     
-class AttnBlock(torch.nn.Module):
+class AttnBlock(pl.LightningModule):
     
     def __init__(self, attn_type, attn_heads=4, in_channels=32):
         super().__init__()
@@ -219,7 +221,7 @@ class AttnBlock(torch.nn.Module):
         
         return (h+h_in) / np.sqrt(2)
     
-class XUNetBlock(torch.nn.Module):
+class XUNetBlock(pl.LightningModule):
     
     def __init__(self, in_channels, features, use_attn=False, attn_heads=4, dropout=0):
         
@@ -256,7 +258,7 @@ class XUNetBlock(torch.nn.Module):
         return h
     
     
-class ConditioningProcessor(torch.nn.Module):
+class ConditioningProcessor(pl.LightningModule):
     
     def __init__(self, emb_ch, H, W,
                  num_resolutions, 
@@ -304,7 +306,7 @@ class ConditioningProcessor(torch.nn.Module):
         
         logsnr = torch.clip(batch['logsnr'], -20, 20)
         lossnr = 2 * torch.arctan(torch.exp(-logsnr / 2)) / torch.pi
-        logsnr_emb = posenc_ddpm(logsnr, emb_ch=self.emb_ch, max_time=1.)
+        logsnr_emb = torch.Tensor(posenc_ddpm(logsnr, emb_ch=self.emb_ch, max_time=1.)).to(self.device)
         logsnr_emb = self.logsnr_emb_emb(logsnr_emb)
         
         
@@ -314,16 +316,16 @@ class ConditioningProcessor(torch.nn.Module):
             spec=cam_spec, world_from_cam=world_from_cam).rays()
         
         
-        pose_emb_pos = posenc_nerf(torch.tensor(rays.pos).float().to(batch['x'].get_device()), min_deg=0, max_deg=15)
-        pose_emb_dir = posenc_nerf(torch.tensor(rays.dir).float().to(batch['x'].get_device()), min_deg=0, max_deg=8)
+        pose_emb_pos = posenc_nerf(torch.tensor(rays.pos).float(), min_deg=0, max_deg=15)
+        pose_emb_dir = posenc_nerf(torch.tensor(rays.dir).float(), min_deg=0, max_deg=8)
         
-        pose_emb = torch.concat([pose_emb_pos, pose_emb_dir], dim=-1) # [batch, h, w, 144]
+        pose_emb = torch.concat([pose_emb_pos, pose_emb_dir], dim=-1).to(self.device) # [batch, h, w, 144]
         
         D = pose_emb.shape[-1]
         assert cond_mask.shape == (B,), (cond_mask.shape, B)
         
-        cond_mask = cond_mask[:, None, None, None, None]
-        pose_emb = torch.where(cond_mask, pose_emb, torch.zeros_like(pose_emb)) #[B, F, H, W, 144]
+        cond_mask = torch.Tensor(cond_mask[:, None, None, None, None]).to(self.device)
+        pose_emb = torch.where(cond_mask, pose_emb, torch.zeros_like(pose_emb).to(self.device)) #[B, F, H, W, 144]
         pose_emb = rearrange(pose_emb, "b f h w c -> b f c h w")
         # pose_emb = torch.tensor(pose_emb).float().to(device)
         
@@ -352,7 +354,7 @@ class ConditioningProcessor(torch.nn.Module):
         return logsnr_emb, pose_embs
     
     
-class XUNet(torch.nn.Module):
+class XUNet(pl.LightningModule):
     H: int = 128
     W: int = 128
     ch: int = 256
@@ -538,23 +540,23 @@ class XUNet(torch.nn.Module):
 if __name__ == "__main__":
     h,w = 56, 56
     b = 8
-    a = torch.nn.DataParallel(XUNet(H=h, W=w, ch=128)).cuda()
+    a = torch.nn.DataParallel(XUNet(H=h, W=w, ch=128))
 
     batch = {
-    'x': torch.zeros(b,3, h, w).cuda(),
-    'z': torch.zeros(b,3, h, w).cuda(),
+    'x': torch.zeros(b,3, h, w),
+    'z': torch.zeros(b,3, h, w),
     'logsnr': torch.tensor([10]*(2*b)).reshape(b,2),
     'R': torch.tensor([[[  # Define a rigid rotation
        [-1/3, -(1/3)**.5, (1/3)**.5],
        [1/3, -(1/3)**.5, -(1/3)**.5],
        [-2/3, 0, -(1/3)**.5]],
-    ]]).repeat(b, 2,1,1).cuda(),
-    't': torch.tensor([[[2, 2, 2]]]).repeat(b,2,1).cuda(),
+    ]]).repeat(b, 2,1,1),
+    't': torch.tensor([[[2, 2, 2]]]).repeat(b,2,1),
     'K':torch.tensor([[  # Define a rigid rotation
        [1, 0, 0],
        [0, 1, 0],
        [0, 0, 1],
-    ]]).repeat(b,1,1).cuda(),
+    ]]).repeat(b,1,1),
     }
 
-    print(a(batch, cond_mask=torch.tensor([True]*b).cuda()).shape)
+    print(a(batch, cond_mask=torch.tensor([True]*b)).shape)
